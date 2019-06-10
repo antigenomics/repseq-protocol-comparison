@@ -1,0 +1,649 @@
+---
+title: "Analysis of rearrangement statistics produced by various RepSeq protocols"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+# devtools::install_github("milaboratory/mirutil")
+library(mirutil)
+library(ggplot2)
+library(forcats) 
+# devtools::install_github("cmartin/ggConvexHull")
+library(ggConvexHull)
+library(cowplot)
+select = dplyr::select
+```
+
+Load results
+
+```{r echo=FALSE, message=FALSE}
+load("stats.RData")
+
+metadata.1 <- metadata %>%
+  filter(!(experiment == "B" & project %in% c("Chudakov", "Chudakov_U"))) %>%
+  mutate(project = gsub("2", "", project)) %>%
+  mutate(project = gsub("-$", "", project))
+
+df.stats <- df.stats %>% 
+  add_metadata(metadata.1)
+
+df.stats$segment.usage <- df.stats$segment.usage %>%
+  filter(segment == "undef" | chain == substr(segment, 1, 3))
+
+df.stats$deletion.size <- df.stats$deletion.size %>%
+  filter(segment == "undef" | chain == substr(segment, 1, 3))
+```
+
+## Plotting rearrangement statistics
+
+All RepSeq protocols are plotted together. Experiments **A** and **B** were performed for CD4 T-cells from two different donors. Experiment **B** was performed with 100ng RNA and included Jurkat spike in (filtered before analysis), experiment **A** involves 10ng and 100ng input RNA and is covered by a subset of RepSeq protocols considered in this study. 
+
+### Plots for segment usage
+
+```{r echo=FALSE, message=FALSE}
+plt_segm <- function(m) {
+  m %>%
+    ggplot(aes(x = fct_reorder(segment, freq.reads), 
+             group = sample.id,
+             y = freq.reads, color = experiment)) +
+    geom_line(alpha = 0.3) +
+    coord_flip() +
+    xlab("") + ylab("Segment frequency") +
+    scale_color_brewer(palette = "Set1") +
+    facet_wrap(~segment.type, scales = "free") +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          axis.text.y = element_text(family = "mono", size = 6),
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+ps1A <- df.stats %>%
+  .$segment.usage %>%
+  filter(chain == "TRA") %>%
+  plt_segm +
+  ggtitle("TCR alpha segment usage")
+ps1A
+
+ps1B <- df.stats %>%
+  .$segment.usage %>%
+  filter(chain == "TRB") %>%
+  plt_segm +
+  ggtitle("TCR beta segment usage")
+ps1B
+```
+
+### Plots for insert size distribution
+
+```{r echo=FALSE, message=FALSE}
+plt_insert_size <- function(m) {
+  m %>%
+    ggplot(aes(x = insertions,
+               color = experiment)) +
+    geom_line(aes(group = sample.id, y = freq.reads), alpha = 0.3) +
+    scale_x_continuous("Insertions", limits = c(0,30)) + ylab("Frequency") +
+    scale_color_brewer(palette = "Set1") +
+    facet_wrap(~chain+ins.type, scales = "free") +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+ps1C <- df.stats %>%
+  .$insert.size %>%
+  filter(!(chain == "TRB" & ins.type == "VJ")) %>%
+  plt_insert_size +
+  ggtitle("Insert size")
+ps1C
+```
+
+### Plots for segment trimming profiles
+
+Note that this plots uses mean frequency profile averaged across segments
+
+```{r echo=FALSE, message=FALSE}
+plt_deletion_size <- function(m) {
+  m %>%
+    group_by(sample.id, experiment, chain, del.type, deletions) %>%
+    summarise(freq.reads = mean(freq.reads)) %>%
+    ggplot(aes(x = deletions,
+               group = sample.id,
+               color = experiment,
+               y = freq.reads)) +
+    geom_line(alpha = 0.3) +
+    xlab("Deletion size") + ylab("Frequency") +
+    scale_color_brewer(palette = "Set1") +
+    facet_wrap(~chain+del.type, scales = "free") +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+ps1D <- df.stats %>%
+  .$deletion.size %>%
+  plt_deletion_size +
+  ggtitle("Deletion size")
+ps1D
+```
+
+### Plots for insert profiles
+
+```{r echo=FALSE, message=FALSE}
+plt_insert_profile <- function(m) {
+  m %>%
+    ggplot(aes(x = paste(nt.1, nt.2, sep = "\n"),
+               color = experiment)) +
+    geom_line(aes(group = sample.id, y = freq.reads), alpha = 0.3) +
+    xlab("Base #1 / Base #2") + ylab("Frequency") +
+    scale_color_brewer(palette = "Set1") +
+    facet_wrap(~chain+ins.profile.type, scales = "free") +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+ps1E <- df.stats %>%
+  .$insert.profile %>%
+  filter(!(chain == "TRB" & ins.profile.type == "nVJ")) %>%
+  plt_insert_profile +
+  ggtitle("Insert profile")
+ps1E
+```
+
+Final figure
+
+```{r fig.height=22, fig.width=6}
+pdf("figS1.pdf", width = 6, height = 22)
+plot_grid(ps1A + ylab(""),
+          ps1B + ylab(""),
+          ps1C + ylab("") +scale_x_continuous("", limits = c(0,30)),
+          ps1D + ylab("") + xlab(""), 
+          ps1E + ylab("") + xlab(""), labels = c("a", "b", "c", "d", "e"),
+          rel_heights = c(1.5 , 1.5, 1, 1, 1),
+          ncol = 1)
+dev.off()
+```
+
+Legend: VDJ rearrangement statistic distributions. a. Variable (V), Joining (J) and Diversity (D) segment usage distributions for TCR alpha (TRA) and beta (TRB) chains. b. Insert size distributions for VJ junctions (TCR alpha chain) and VD/DJ junctions (TCR beta chain). c. Number of nucleotides trimmed from 5' and 3' ends of V, D and J segments for TCR alpha (TRA) and beta (TRB) chains. d. Non-template nucleotide frequencies for VJ (nVJ), VD/DJ (nVD and nDJ) junctions. Insertion probabilities of an observed base (top letter) given previous base (bottom letter) are given, 5'->3' direction is considered for nVJ and nVD, 3'->5' is considered for nDJ.
+
+## Distances between inferred rearrangement models for samples from various protocols
+
+We will use Jensen-Shannon distances between various rearrangement probability profiles (V usage, insert size, ... distributions).
+
+Compute pairwise distances
+
+```{r echo=FALSE, message=FALSE}
+# start.time <- Sys.time()
+# df.dist <- df.stats %>% 
+#   compute_rearr_stat_dist(cores = 80)
+# end.time <- Sys.time()
+# time.taken <- end.time - start.time
+# time.taken
+
+# save(df.dist, file = "stats_dist.RData")
+load("stats_dist.RData")
+
+df.dist.1 <- df.dist %>%
+  symmetrize_dists %>%
+  add_metadata(metadata.1)
+```
+
+### Experiment B analysis in replicability and reproducibility
+
+This is the latest experiment that is covered by a full set of protocols. First, we'll compute mean within and between protocol distances and plot them.
+
+```{r echo=FALSE, message=FALSE}
+df.dist.B.m <- df.dist.1 %>%
+  mutate(d = rank(d)) %>%
+  filter(experiment.1 == "B" & experiment.2 == "B",
+         sample.id.1 != sample.id.2) %>%
+  group_by(chain, statistic, type, value.type, project.1, 
+           same.proj = ifelse(project.1 == project.2, "replicability", "reproducibility")) %>%
+  summarise(d = mean(d)) %>%
+  group_by(chain, statistic, type) %>%
+  mutate(d.sc = scale(d)) %>%
+  ungroup
+```
+
+Replicability - mean divergence between samples from the same project ("can I replicate my study?"), and reproducibility - mean divergence between samples from a given project and all other project ("can others reproduce my study?") plots for all protocols. Scaled divergence values are used to control for bias across various statistics. Protocols are ordered by X axis from the most reproducible/replicable to less ones.
+
+```{r fig.width=10, fig.height=6, echo=FALSE, message=FALSE}
+plot_dist <- function(data) {
+  data %>%
+    filter(!(chain == "TRB" & type %in% c("VJ", "nVJ"))) %>%
+    ggplot(aes(x = fct_reorder(project.1, d.sc, .fun = mean), y = paste(statistic, type))) +
+    geom_tile(aes(fill = d.sc)) +
+    scale_fill_distiller("Scaled divergence\n(more = worse)", 
+                         palette = "Spectral") +
+    xlab("") + ylab("") +
+    facet_grid(chain ~ value.type, scales = "free", space = "free") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+df.dist.B.m %>% filter(same.proj == "replicability") %>% plot_dist + ggtitle("Replicability")
+df.dist.B.m %>% filter(same.proj == "reproducibility") %>% plot_dist + ggtitle("Reproducibility")
+```
+
+```{r}
+plot_dist <- function(data) {
+  data %>%
+    filter(!(chain == "TRB" & type %in% c("VJ", "nVJ"))) %>%
+    ggplot(aes(x = fct_reorder(project.1, d.sc, .fun = mean), y = paste(statistic, type))) +
+    geom_tile(aes(fill = d.sc)) +
+    scale_fill_distiller("Scaled divergence\n(more = worse)", 
+                         palette = "Spectral") +
+    xlab("") + ylab("") +
+    facet_grid(. ~ value.type, scales = "free", space = "free") +
+    theme_bw() +
+    theme(aspect = 1,axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+df.dist.B.m %>% filter(same.proj == "replicability", chain == "TRA") %>% 
+  plot_dist + ggtitle("Replicability TRA") -> p1A
+df.dist.B.m %>% filter(same.proj == "replicability", chain == "TRB") %>% 
+  plot_dist + ggtitle("Replicability TRB") -> p1B
+df.dist.B.m %>% filter(same.proj == "reproducibility", chain == "TRA") %>%
+  plot_dist + ggtitle("Reproducibility TRA") -> p1C
+df.dist.B.m %>% filter(same.proj == "reproducibility", chain == "TRB") %>% 
+  plot_dist + ggtitle("Reproducibility TRB") -> p1D
+p1A
+p1B
+p1C
+p1D
+```
+
+Modified version for plots
+
+```{r}
+plot_dist.1 <- function(data) {
+  data %>%
+    filter(!(chain == "TRB" & type %in% c("VJ", "nVJ"))) %>%
+    ggplot(aes(x = fct_reorder(project.1, d.sc, .fun = mean), y = paste(statistic, type))) +
+    geom_tile(aes(fill = d.sc)) +
+    scale_fill_distiller("Scaled divergence\n(more = worse)", 
+                         palette = "Spectral") +
+    xlab("") + ylab("") +
+    theme_bw() +
+    theme(aspect = 1,axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+df.dist.B.m %>% filter(same.proj == "replicability", chain == "TRA", value.type == "reads") %>% 
+  mutate(project.1 = recode(project.1, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  plot_dist.1 + ggtitle("Replicability TRA") -> p1AX
+ p1AX
+df.dist.B.m %>% filter(same.proj == "replicability", chain == "TRB", value.type == "reads") %>% 
+  mutate(project.1 = recode(project.1, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  plot_dist.1 + ggtitle("Replicability TRB") -> p1BX
+p1BX
+df.dist.B.m %>% filter(same.proj == "reproducibility", chain == "TRA", value.type == "reads") %>%
+  mutate(project.1 = recode(project.1, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  plot_dist.1 + ggtitle("Reproducibility TRA") -> p1CX
+p1CX
+df.dist.B.m %>% filter(same.proj == "reproducibility", chain == "TRB", value.type == "reads") %>%
+  mutate(project.1 = recode(project.1, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  plot_dist.1 + ggtitle("Reproducibility TRB") -> p1DX
+p1DX
+
+pdf("fig1-d-1.pdf")
+p1AX
+dev.off()
+pdf("fig1-d-2.pdf")
+p1BX
+dev.off()
+pdf("fig1-d-3.pdf")
+p1CX
+dev.off()
+pdf("fig1-d-4.pdf")
+p1DX
+dev.off()
+```
+
+```{r fig.height=16, fig.width=8}
+pdf("fig1.pdf", width = 8, height = 16)
+plot_grid(p1A,
+          p1B,
+          p1C,
+          p1D, 
+          labels = c("a", "b", "c", "d"),
+          ncol = 1)
+dev.off()
+```
+
+Legend: Comparative analysis of protocols. a. Replicability of TCR alpha chain sequencing data. b. Replicability of TCR beta chain sequencing data. c. Reproducibility of TCR alpha chain sequencing data. d. Reproducibility of TCR beta chain sequencing data. Here replicability means the scaled distance between replicas produced by the same protocol (how well one can replicate the study given the same setup), reproducibility means the scaled distance between replicas of a given protocol and all other protocols (how well a given study is reproduced using other setups). Jensen-Shannon divergence between various probability distributions of observed VDJ rearrangements (rows) is used as distance to rate different protocols (columns). Columns are sorted according to mean scaled distance from lowest (best replicability/reproducibility) to highest (worst replicability/reproducibility). Distance values are shown using a color scale.
+
+### MDS placement of protocols in experiment B by various statistics
+
+Here we perform MDS placement for various rearrangement statistics of samples in the experiment **B** to highlight the fact that in some cases there is a clear separation of samples produced by different protocols.
+
+Compute and plot MDS
+
+```{r fig.width=10, fig.height=6, echo=FALSE, message=FALSE}
+df.mds.B <- df.dist.1 %>% 
+  mutate(d = rank(d)) %>%
+  filter(experiment.1 == "B" & experiment.2 == "B", 
+         sample.id.1 > sample.id.2) %>%
+  compute_rearr_stat_mds(cores = 80) %>% 
+  add_metadata(metadata)
+
+c_norm <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+
+plt_mds <- function(m) {
+  m %>%
+    group_by(value.type, chain, type) %>%
+    mutate(mds.x = c_norm(mds.x), mds.y = c_norm(mds.y)) %>%
+    ggplot(aes(x = mds.x, y = mds.y, color = project)) +
+    geom_point(alpha = 0.9) +
+    xlab("") + ylab("") +
+    facet_grid(value.type~chain + type, scales = "free") +
+    scale_color_brewer(palette = "Paired") +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+ps2A <- df.mds.B %>%
+  filter(statistic == "segment.usage") %>%
+  plt_mds +
+  ggtitle("Segment usage")
+ps2A
+
+ps2B <- df.mds.B %>%
+  filter(statistic == "insert.size") %>%
+  filter(!(chain == "TRB" & type == "VJ")) %>%
+  plt_mds +
+  ggtitle("Insert size")
+ps2B
+
+ps2C <- df.mds.B %>%
+  filter(statistic == "deletion.size") %>%
+  plt_mds +
+  ggtitle("Deletion size")
+ps2C
+
+ps2D <- df.mds.B %>%
+  filter(statistic == "insert.profile") %>%
+  filter(!(chain == "TRB" & type == "nVJ")) %>%
+  plt_mds +
+  ggtitle("Insert profile")
+ps2D
+```
+
+Figure
+
+```{r fig.height=16, fig.width=8}
+pdf("figS2.pdf", width = 8, height = 16)
+plot_grid(ps2A + ylab(""),
+          ps2B + ylab(""),
+          ps2C + ylab(""),
+          ps2D + ylab(""), 
+          labels = c("a", "b", "c", "d"),
+          ncol = 1)
+dev.off()
+```
+Legend: Multi-dimensional scaling (MDS) placement of samples from experiment B. a. Sample placement based on VDJ segment usage. b. Sample placement based on non-template nucleotide insert size distributions. c. Sample placement based on V/D/J segment trimming distributions. d. Sample placement based on nucleotide frequencies in N-inserts. MDS is performed on VDJ rearrangement statistic distributions using Jensen-Shannon distance (JSD). JSD values were transformed to ranks for the sake of better visualization in the presence of outliers. 
+
+## Looking at donor-specific and protocol-specific variance
+
+Here we apply MDS to results of RepSeq protocols for which we have samples from two separate donors (experiments **A** and **B** respectively). As can be seen from MDS plots, in many cases there are clearly two axes - related to individual and protocol variances. So, while it is possible to separate samples from different donors given several protocols are used, the separation is nearly impossible for certain pairs of protocols: one needs several different protocols to actually tell the "protocol" axis from the "donor" one.
+
+```{r fig.width=10, fig.height=6, echo=FALSE, message=FALSE}
+both_exp <- metadata.1 %>% 
+  group_by(pc = paste(project, chain)) %>% 
+  summarise(nexp = length(unique(experiment))) %>%
+  filter(nexp == 2) %>%
+  .$pc
+
+df.mds.AB <- df.dist.1 %>%
+  mutate(d = rank(d)) %>%
+  filter(paste(project.1, chain) %in% both_exp,
+         paste(project.2, chain) %in% both_exp,
+         sample.id.1 > sample.id.2) %>%
+  compute_rearr_stat_mds(cores = 80) %>% 
+  add_metadata(metadata.1)
+
+plt_mds_2 <- function(m) {
+  m %>%
+    group_by(value.type, chain, type) %>%
+    mutate(mds.x = c_norm(mds.x), mds.y = c_norm(mds.y)) %>%
+    ggplot(aes(x = mds.x, y = mds.y, color = project)) +
+    geom_convexhull(aes(group = experiment, linetype = experiment), 
+                    fill = "grey", color = "grey", alpha = 0.2) +
+    geom_point(aes(fill = project, shape = experiment)) +
+    scale_x_continuous("", breaks = c()) + 
+    scale_y_continuous("", breaks = c()) + 
+    facet_grid(value.type ~ chain + type, scales = "free") +
+    scale_shape_manual(values = c(24, 25)) +
+    scale_fill_brewer(palette = "Paired") +
+    scale_color_brewer(palette = "Paired") +
+    theme_bw() +
+    theme(aspect = 1, legend.position = "bottom",
+          strip.background = element_rect(fill = NA, color = NA),
+          #panel.background = element_rect(fill = "grey90", color = NA),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank())
+}
+
+p2A <- df.mds.AB %>%
+  filter(statistic == "segment.usage") %>%
+  plt_mds_2 +
+  ggtitle("Segment usage")
+p2A
+
+p2B <- df.mds.AB %>%
+  filter(statistic == "insert.size") %>%
+  filter(!(chain == "TRB" & type == "VJ")) %>%
+  plt_mds_2 +
+  ggtitle("Insert size")
+p2B
+
+p2C <- df.mds.AB %>%
+  filter(statistic == "deletion.size") %>%
+  plt_mds_2 +
+  ggtitle("Deletion size")
+p2C
+
+p2D <- df.mds.AB %>%
+  filter(statistic == "insert.profile") %>%
+  filter(!(chain == "TRB" & type == "nVJ")) %>%
+  plt_mds_2 +
+  ggtitle("Insert profile")
+p2D
+```
+
+Alternative plots
+
+```{r fig.width=10, fig.height=6, echo=FALSE, message=FALSE}
+p2AX <- df.mds.AB %>%
+  filter(statistic == "segment.usage", value.type == "reads") %>%
+  mutate(project = recode(project, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  plt_mds_2 +
+  facet_wrap(chain ~ type, scales = "free") +
+  scale_color_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  scale_fill_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  ggtitle("Segment usage")
+p2AX
+
+p2BX <- df.mds.AB %>%
+  filter(statistic == "insert.size", value.type == "reads") %>%
+  mutate(project = recode(project, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  filter(!(chain == "TRB" & type == "VJ")) %>%
+  plt_mds_2 +
+  facet_wrap(chain ~ type, scales = "free") +
+  scale_color_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  scale_fill_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  ggtitle("Insert size")
+p2BX
+
+p2CX <- df.mds.AB %>%
+  filter(statistic == "deletion.size", value.type == "reads") %>%
+  mutate(project = recode(project, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  plt_mds_2 +
+  facet_wrap(chain ~ type, scales = "free") +
+  scale_color_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  scale_fill_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  ggtitle("Deletion size")
+p2CX
+
+p2DX <- df.mds.AB %>%
+  filter(statistic == "insert.profile", value.type == "reads") %>%
+  mutate(project = recode(project, Adaptive    = "Multiplex-1",
+                                   Chain       = "RACE-1",
+                                   Chain_U     = "RACE-1_U",
+                                   Chudakov    = "RACE-2",
+                                   Chudakov_U  = "RACE-2_U",
+                                   Clontech    = "RACE-3",
+                                   Douek       = "RACE-4",
+                                   Eugster     = "RACE-5",
+                                   Invitrogen  = "RACE-6",
+                                   iRepertoire = "Multiplex-2")) %>%
+  filter(!(chain == "TRB" & type == "nVJ")) %>%
+  plt_mds_2 +
+  facet_wrap(chain ~ type, scales = "free") +
+  scale_color_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  scale_fill_manual("Method", values = c("red", "blueviolet", 
+                                          "mediumorchid1", "forestgreen",
+                                          "chartreuse3", "orange",
+                                          "blue")) +
+  ggtitle("Insert profile")
+p2DX
+
+pdf("fig1-c-1.pdf")
+p2AX
+dev.off()
+pdf("fig1-c-2.pdf")
+p2BX
+dev.off()
+pdf("fig1-c-3.pdf")
+p2CX
+dev.off()
+pdf("fig1-c-4.pdf")
+p2DX
+dev.off()
+```
+
+```{r fig.height=16, fig.width=8}
+pdf("fig2.pdf", width = 8, height = 16)
+plot_grid(p2A + ylab(""),
+          p2B + ylab(""),
+          p2C + ylab(""),
+          p2D + ylab(""), 
+          labels = c("a", "b", "c", "d"),
+          ncol = 1)
+dev.off()
+```
+
+Legend: Multi-dimensional scaling (MDS) placement of samples from experiments A and B (two distinct donors) for protocols that were used in both of the experiments. a. Sample placement based on VDJ segment usage. b. Sample placement based on non-template nucleotide insert size distributions. c. Sample placement based on V/D/J segment trimming distributions. d. Sample placement based on nucleotide frequencies in N-inserts. MDS is performed on VDJ rearrangement statistic distributions using Jensen-Shannon distance (JSD). JSD values were transformed to ranks for the sake of better visualization in the presence of outliers. Solid and dotted polygons outline samples from experiment A and B respectively.
+
+```{r}
+```
